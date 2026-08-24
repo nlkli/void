@@ -9,14 +9,18 @@ use winit::window as WW;
 use vello as V;
 use vello::kurbo as K;
 
+use crate::any_shape::AnyShape;
 use crate::camera::Camera;
 use crate::cli;
 use crate::config::Config;
-use crate::elem::{Elem, Style as EStyle};
+use crate::element::{Element, ElementInner, ElementState};
+
+use crate::tmp::Editor;
 
 use crate::external_event::{
     ExternalEvent, ExternalEventProducerHandle, spawn_external_event_producer,
 };
+use crate::style::Style;
 
 #[cfg(target_os = "macos")]
 use winit::platform::macos::WindowExtMacOS as _;
@@ -32,50 +36,18 @@ enum RenderState {
     },
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-enum Mode {
-    #[default]
-    Hand,
-    Selection,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct MouseState {
-    cursor_pos: K::Point,
-    cursor_delta: K::Vec2,
-    // [0] left; [1] right
-    pressed: [bool; 3],
-    pressed_pos: [K::Point; 3],
-    ptime: [std::time::Instant; 3],
-    ptime_prev: [std::time::Instant; 3],
-    pressed_prev: [bool; 3],
-}
-
-impl Default for MouseState {
-    fn default() -> Self {
-        unsafe { std::mem::zeroed() }
-    }
-}
-
 struct AppState {
     eproxy: WEL::EventLoopProxy<ExternalEvent>,
+
     rctx: V::util::RenderContext,
     rstate: RenderState,
+
     scene: V::Scene,
 
-    camera: Vec<Camera>,
-    camera_idx: usize,
-
-    elements: Vec<Elem>,
-
-    mode: Mode,
-
-    mouse: MouseState,
+    editor: Editor,
 
     config: Config,
 }
-
-impl AppState {}
 
 impl winit::application::ApplicationHandler<ExternalEvent> for AppState {
     fn resumed(&mut self, el: &WEL::ActiveEventLoop) {
@@ -138,56 +110,15 @@ impl winit::application::ApplicationHandler<ExternalEvent> for AppState {
             WE::WindowEvent::Resized(size) => {
                 if size.width != 0 && size.height != 0 {
                     self.rctx.resize_surface(surface, size.width, size.height);
-                    self.camera[self.camera_idx].state_mut().viewport =
-                        K::Size::new(size.width as f64, size.height as f64);
+                    self.editor
+                        .set_viewport(size.width as f64, size.height as f64);
                     window.request_redraw();
-                }
-            }
-            WE::WindowEvent::KeyboardInput {
-                event,
-                // is_synthetic,
-                ..
-            } => {
-                println!("- {:?}", event);
-            }
-            WE::WindowEvent::MouseInput { state, button, .. } => {
-                let mut nbt = match button {
-                    WE::MouseButton::Left => 1,
-                    WE::MouseButton::Right => 2,
-                    WE::MouseButton::Middle => 3,
-                    _ => 0,
-                };
-                if nbt > 0 {
-                    nbt -= 1;
-                    self.mouse.pressed_prev[nbt] = self.mouse.pressed[nbt];
-                    self.mouse.pressed[nbt] = state == WE::ElementState::Pressed;
-                    self.mouse.pressed_pos[nbt] = self.mouse.cursor_pos;
-                    self.mouse.ptime_prev[nbt] = self.mouse.ptime[nbt];
-                    self.mouse.ptime[nbt] = std::time::Instant::now();
-                }
-            }
-            WE::WindowEvent::CursorMoved { position, .. } => {
-                let new_cursor_pos = K::Point::new(position.x, position.y);
-                self.mouse.cursor_delta = self.mouse.cursor_pos - new_cursor_pos;
-                self.mouse.cursor_pos = new_cursor_pos;
-
-                match self.mode {
-                    Mode::Hand => {
-                        if self.mouse.pressed[0] || self.mouse.pressed[2] {
-                            self.camera[self.camera_idx]
-                                .pan_by_screen_delta(-self.mouse.cursor_delta);
-
-                            window.request_redraw();
-                        }
-                    }
-                    Mode::Selection => todo!(),
-                    _ => {}
                 }
             }
             WE::WindowEvent::RedrawRequested => {
                 self.scene.reset();
 
-                self.camera[self.camera_idx].render(&mut self.scene, &mut self.elements);
+                self.editor.render(&mut self.scene);
 
                 // self.scene.draw_glyphs(&vello::peniko::FontData{});
                 // self.scene.try_into
@@ -248,7 +179,7 @@ impl winit::application::ApplicationHandler<ExternalEvent> for AppState {
 
                 surface_texture.present();
             }
-            _ => {}
+            _ => self.editor.dispatch_window_event(event, window),
         }
     }
 
@@ -304,33 +235,25 @@ pub fn run() -> Result<()> {
 
     let event_loop = WEL::EventLoop::<ExternalEvent>::with_user_event().build()?;
 
+    let mut editor = Editor::new();
+    editor.set_viewport(
+        args.config.window.width as f64,
+        args.config.window.height as f64,
+    );
+
     let mut app = AppState {
         eproxy: event_loop.create_proxy(),
         rctx: V::util::RenderContext::new(),
         rstate: RenderState::Suspended(None),
+        editor: editor,
         scene: V::Scene::new(),
-        mode: Mode::default(),
-        camera: vec![
-            Camera::builder()
-                .with_viewport_size(
-                    args.config.window.width as f64,
-                    args.config.window.height as f64,
-                )
-                .build(),
-        ],
-        camera_idx: 0,
-        elements: Vec::new(),
-        mouse: MouseState::default(),
         config: args.config,
     };
 
-    app.elements.push(
-        Elem::builder()
-            .with_shape(K::Rect::new(10., 10., 40., 40.))
-            .with_style(EStyle::filled(V::peniko::color::palette::css::RED))
-            .with_rotation(30.)
-            .build(),
-    );
+    app.editor.add_element(Element::new(ElementInner::Shape {
+        value: K::Rect::new(10., 10., 40., 40.).into(),
+        style: Style::filled(V::peniko::color::palette::css::RED),
+    }));
 
     let _ = event_loop.run_app(&mut app);
 

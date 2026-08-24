@@ -3,8 +3,6 @@ use vello::{
     kurbo::{Affine, Point, Rect, Size, Vec2},
 };
 
-use crate::elem::Elem;
-
 pub const MIN_ZOOM: f64 = 1e-6;
 pub const MAX_ZOOM: f64 = 1e6;
 
@@ -186,25 +184,6 @@ impl Camera {
     #[inline(always)]
     pub fn reset_with_viewport(&mut self) {
         *self = Self::builder().with_viewport(self.state.viewport).build();
-    }
-
-    pub fn render<'a, I>(&mut self, scene: &mut Scene, els: I)
-    where
-        I: IntoIterator<Item = &'a mut Elem>,
-    {
-        // Single dirty-check for both cached values instead of two separate
-        // ensure_updated() calls through transform()+visible_world_rect().
-        self.ensure_updated();
-        let camera_transform = self.transform;
-        let visible = self.visible_world_rect;
-
-        for el in els {
-            let bbox = el.world_bounding_box();
-            let r = visible.intersect(bbox);
-            if r.width() > 0.0 && r.height() > 0.0 {
-                el.render_with_base(scene, camera_transform);
-            }
-        }
     }
 }
 

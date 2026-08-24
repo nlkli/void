@@ -1,14 +1,16 @@
+mod any_shape;
 mod app;
 mod camera;
+mod tmp;
 mod cli;
 mod config;
-mod elem;
 mod document;
-mod elements;
-mod external_event;
+mod editor;
 mod element;
-mod any_shape;
+mod external_event;
+mod session;
 mod style;
+mod view;
 
 fn main() {
     app::run().unwrap();

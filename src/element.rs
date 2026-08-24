@@ -83,6 +83,7 @@ impl Element {
             ElementInner::Group(_elements) => todo!(),
             _ => {}
         }
+        self.inner = inner;
         self.dirty = true;
     }
 
