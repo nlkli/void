@@ -73,16 +73,13 @@ impl Element {
         &self.inner
     }
 
-    #[inline(always)]
     pub fn set_inner(&mut self, inner: ElementInner) {
-        match inner {
-            ElementInner::Shape { value, .. } => {
-                self.local_bbox = value.bounding_box();
-            }
+        self.local_bbox = match &inner {
+            ElementInner::Shape { value, .. } => value.bounding_box(),
             ElementInner::Text(_) => todo!(),
             ElementInner::Group(_elements) => todo!(),
-            _ => {}
-        }
+            ElementInner::None => Rect::ZERO,
+        };
         self.inner = inner;
         self.dirty = true;
     }
@@ -98,21 +95,6 @@ impl Element {
         &mut self.state
     }
 
-    #[inline(always)]
-    fn is_identity(&self) -> bool {
-        self.state.position == Point::ZERO
-            && self.state.rotation == 0.0
-            && self.state.scale == Vec2::new(1.0, 1.0)
-    }
-
-    #[inline(always)]
-    fn anchor_offset(&self) -> Vec2 {
-        Vec2::new(
-            self.local_bbox.x0 + self.local_bbox.width() * self.state.anchor.x,
-            self.local_bbox.y0 + self.local_bbox.height() * self.state.anchor.y,
-        )
-    }
-
     fn recompute(&mut self) {
         self.transform = Affine::translate(self.state.position.to_vec2())
             * Affine::rotate(self.state.rotation)
@@ -122,29 +104,26 @@ impl Element {
                 self.local_bbox.y0 + self.local_bbox.height() * self.state.anchor.y,
             ));
 
-        self.world_bbox = if self.is_identity() {
-            self.local_bbox
-        } else {
-            let [a, b, c, d, e, f] = self.transform.as_coeffs();
-            let local = self.local_bbox;
+        let [a, b, c, d, e, f] = self.transform.as_coeffs();
 
-            let center_x = (local.x0 + local.x1) * 0.5;
-            let center_y = (local.y0 + local.y1) * 0.5;
-            let half_w = (local.x1 - local.x0) * 0.5;
-            let half_h = (local.y1 - local.y0) * 0.5;
+        let local_bbox = self.local_bbox;
 
-            let new_center_x = a * center_x + c * center_y + e;
-            let new_center_y = b * center_x + d * center_y + f;
-            let new_half_w = a.abs() * half_w + c.abs() * half_h;
-            let new_half_h = b.abs() * half_w + d.abs() * half_h;
+        let center_x = (local_bbox.x0 + local_bbox.x1) * 0.5;
+        let center_y = (local_bbox.y0 + local_bbox.y1) * 0.5;
+        let half_w = (local_bbox.x1 - local_bbox.x0) * 0.5;
+        let half_h = (local_bbox.y1 - local_bbox.y0) * 0.5;
 
-            Rect::new(
-                new_center_x - new_half_w,
-                new_center_y - new_half_h,
-                new_center_x + new_half_w,
-                new_center_y + new_half_h,
-            )
-        };
+        let new_center_x = a * center_x + c * center_y + e;
+        let new_center_y = b * center_x + d * center_y + f;
+        let new_half_w = a.abs() * half_w + c.abs() * half_h;
+        let new_half_h = b.abs() * half_w + d.abs() * half_h;
+
+        self.world_bbox = Rect::new(
+            new_center_x - new_half_w,
+            new_center_y - new_half_h,
+            new_center_x + new_half_w,
+            new_center_y + new_half_h,
+        );
 
         self.dirty = false;
     }
@@ -186,7 +165,7 @@ impl Element {
                 }
             }
             ElementInner::Text(_) => todo!(),
-            ElementInner::Group(elements) => todo!(),
+            ElementInner::Group(_elements) => todo!(),
             _ => {}
         }
     }

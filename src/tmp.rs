@@ -9,50 +9,50 @@ use winit::{
     window::{CursorIcon, Window},
 };
 
+/// Default zoom applied to the initial camera on editor creation.
+const DEFAULT_ZOOM: f64 = 1.9;
+
 #[derive(Debug, Clone, Copy)]
 struct MouseState {
     cursor_pos: K::Point,
-    // cursor_delta: K::Vec2,
-    // [0] left; [1] right
+    /// Index into `pressed`/`ptime`: 0 = left, 1 = right, 2 = middle.
     pressed: [bool; 3],
-    // pressed_pos: [K::Point; 3],
-    // ptime: [std::time::Instant; 3],
-    // ptime_prev: [std::time::Instant; 3],
-    // pressed_prev: [bool; 3],
+    ptime: [std::time::Instant; 3],
 }
 
 impl Default for MouseState {
     fn default() -> Self {
-        unsafe { std::mem::zeroed() }
+        // `Instant` has no guaranteed all-zero representation, so it can't be
+        // safely zero-initialized. Build a real default explicitly instead.
+        let now = std::time::Instant::now();
+        Self {
+            cursor_pos: K::Point::ZERO,
+            pressed: [false; 3],
+            ptime: [now; 3],
+        }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ElementId(u64);
 
-// pub struct Document {
-//     elements: Vec<(ElementId, Element)>,
-//     id_acc: u64,
-// }
-
-// #[derive(Debug, Clone, Copy)]
-// pub enum Command {
-//     None,
-//     SetTool(Tool),
-//     MoveCamera(K::Vec2),
-// }
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Tool {
     #[default]
     Selection,
     Hand,
-    // Rectangle,
+    Rectangle,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct Editor {
     elements: Vec<(ElementId, Element)>,
+    selected: Vec<ElementId>,
+    // Placeholder for an in-progress marquee/rectangle selection.
+    // Not yet used; will likely become a small struct (start/end points).
+    selection: Option<()>,
+    hit_element: Option<ElementId>,
+
     id_acc: u64,
 
     tool: Tool,
@@ -64,7 +64,9 @@ pub struct Editor {
 impl Editor {
     pub fn new() -> Self {
         let mut editor = Self::default();
-        editor.camera.push(Camera::default());
+        editor
+            .camera
+            .push(Camera::builder().with_zoom(DEFAULT_ZOOM).build());
         editor
     }
 
@@ -89,7 +91,7 @@ impl Editor {
         match self.tool {
             Tool::Selection => window.set_cursor(CursorIcon::Default),
             Tool::Hand => window.set_cursor(CursorIcon::Grab),
-            _ => {}
+            Tool::Rectangle => window.set_cursor(CursorIcon::Crosshair),
         }
     }
 
@@ -124,36 +126,49 @@ impl Editor {
         btn: WE::MouseButton,
         window: &mut Arc<Window>,
     ) {
-        let mut nbtn = match btn {
+        let is_pressed = state == WE::ElementState::Pressed;
+
+        // Resolve the button to a slot in `mouse.pressed`/`mouse.ptime`,
+        // running any tool-specific side effects along the way.
+        // `None` means "a button we don't track" (e.g. back/forward).
+        let button_index = match btn {
             WE::MouseButton::Left => {
-                if self.tool == Tool::Hand {
-                    if state == WE::ElementState::Pressed {
-                        window.set_cursor(CursorIcon::Grabbing)
-                    } else {
-                        self.set_cursor_by_tool(window);
+                match self.tool {
+                    Tool::Selection => {
+                        if is_pressed {
+                            if let Some(id) = self.hit_element {
+                                self.selected.clear();
+                                self.selected.push(id);
+                                println!("hit: {:?}", id);
+                            }
+                        }
                     }
+                    Tool::Hand => {
+                        if is_pressed {
+                            window.set_cursor(CursorIcon::Grabbing)
+                        } else {
+                            self.set_cursor_by_tool(window);
+                        }
+                    }
+                    Tool::Rectangle => {}
                 }
-                1
+                Some(0)
             }
-            WE::MouseButton::Right => 2,
+            WE::MouseButton::Right => Some(1),
             WE::MouseButton::Middle => {
-                if state == WE::ElementState::Pressed {
+                if is_pressed {
                     window.set_cursor(CursorIcon::Grabbing)
                 } else {
                     self.set_cursor_by_tool(window);
                 }
-                3
+                Some(2)
             }
-            _ => 0,
+            _ => None,
         };
 
-        if nbtn > 0 {
-            nbtn -= 1;
-            // self.mouse.pressed_prev[nbt] = self.mouse.pressed[nbt];
-            self.mouse.pressed[nbtn] = state == WE::ElementState::Pressed;
-            // self.mouse.pressed_pos[nbt] = self.mouse.cursor_pos;
-            // self.mouse.ptime_prev[nbt] = self.mouse.ptime[nbt];
-            // self.mouse.ptime[nbt] = std::time::Instant::now();
+        if let Some(index) = button_index {
+            self.mouse.pressed[index] = is_pressed;
+            self.mouse.ptime[index] = std::time::Instant::now();
         }
     }
 
@@ -164,11 +179,36 @@ impl Editor {
         window: &mut Arc<Window>,
     ) {
         let new_cursor_pos = K::Point::new(position.x, position.y);
-        let cursor_delta = self.mouse.cursor_pos - new_cursor_pos;
+        let cursor_delta = new_cursor_pos - self.mouse.cursor_pos;
         self.mouse.cursor_pos = new_cursor_pos;
 
+        // Hit test against elements visible in the current viewport.
+        let camera = self.current_camera_mut();
+        let transform = camera.transform().inverse();
+        let visible = camera.visible_world_rect();
+        let world_cursor_pos = transform * self.mouse.cursor_pos;
+
+        self.hit_element = None;
+        for (id, el) in self.elements.iter_mut() {
+            if !visible.overlaps(el.world_bounding_box()) {
+                continue;
+            }
+            if el.world_bounding_box().contains(world_cursor_pos) {
+                self.hit_element = Some(*id);
+            }
+        }
+
+        if self.tool == Tool::Selection && !self.mouse.pressed[2] {
+            if self.hit_element.is_some() {
+                window.set_cursor(CursorIcon::Move)
+            } else {
+                self.set_cursor_by_tool(window);
+            }
+        }
+
+        // Hand tool + left-button drag, or middle-button drag, pans the camera.
         if (self.tool == Tool::Hand && self.mouse.pressed[0]) || self.mouse.pressed[2] {
-            self.current_camera().pan_by_screen_delta(-cursor_delta);
+            self.current_camera_mut().pan_by_screen_delta(cursor_delta);
             window.request_redraw();
         }
     }
@@ -180,24 +220,23 @@ impl Editor {
     }
 
     #[inline(always)]
-    fn current_camera(&mut self) -> &mut Camera {
+    fn current_camera_mut(&mut self) -> &mut Camera {
         &mut self.camera[self.camera_idx]
     }
 
     #[inline(always)]
     pub fn set_viewport(&mut self, width: f64, height: f64) {
-        self.current_camera().state_mut().viewport = K::Size::new(width, height);
+        self.current_camera_mut().state_mut().viewport = K::Size::new(width, height);
     }
 
     pub fn render(&mut self, scene: &mut V::Scene) {
-        let camera = self.current_camera();
+        let camera = self.current_camera_mut();
         let camera_transform = camera.transform();
         let visible = camera.visible_world_rect();
 
         for (_, el) in self.elements.iter_mut() {
             let bbox = el.world_bounding_box();
-            let r = visible.intersect(bbox);
-            if r.width() > 0.0 && r.height() > 0.0 {
+            if visible.overlaps(bbox) {
                 el.render_with_base(scene, camera_transform);
             }
         }
