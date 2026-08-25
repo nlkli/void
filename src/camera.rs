@@ -104,21 +104,22 @@ impl Camera {
         s.position -= screen_delta / s.zoom;
     }
 
-    pub fn zoom_at(&mut self, screen_point: Point, new_zoom: f64) {
+    pub fn zoom_at(&mut self, screen_point: Point, new_zoom: f64, bias: f64) {
         self.ensure_updated();
 
         let new_zoom = new_zoom.clamp(MIN_ZOOM, MAX_ZOOM);
         let s = self.state_mut();
-        let offset = screen_point.to_vec2() - (s.viewport * 0.5).to_vec2();
+        let full_offset = screen_point.to_vec2() - (s.viewport * 0.5).to_vec2();
+        let offset = full_offset * bias;
+        let world_under_point = s.position + offset / s.zoom;
 
-        let world_under_cursor = s.position + offset / s.zoom;
         s.zoom = new_zoom;
-        s.position = world_under_cursor - offset / new_zoom;
+        s.position = world_under_point - offset / new_zoom;
     }
 
     #[inline(always)]
-    pub fn zoom_by_at(&mut self, screen_point: Point, factor: f64) {
-        self.zoom_at(screen_point, self.state.zoom * factor);
+    pub fn zoom_by_at(&mut self, screen_point: Point, factor: f64, bias: f64) {
+        self.zoom_at(screen_point, self.state.zoom * factor, bias);
     }
 
     #[inline(always)]

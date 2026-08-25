@@ -250,11 +250,157 @@ pub fn run() -> Result<()> {
         config: args.config,
     };
 
-    app.editor.add_element(Element::new(ElementInner::Shape {
-        value: K::Rect::new(10., 10., 40., 40.).into(),
-        style: Style::filled(V::peniko::color::palette::css::RED),
-    }));
+    let mut elements = vec![
+        Element::new(ElementInner::Shape {
+            value: K::Rect::new(10., 10., 40., 40.).into(),
+            style: Style::filled(V::peniko::color::palette::css::RED),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Circle::new(K::Point::new(120., 60.), 35.).into(),
+            style: Style::stroked(V::peniko::color::palette::css::BLUE, 5.),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Rect::new(200., 20., 320., 90.).into(),
+            style: Style::filled(V::peniko::color::palette::css::GREEN),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Ellipse::new(K::Point::new(400., 100.), K::Vec2::new(60., 30.), 0.).into(),
+            style: Style::filled_and_stroked(
+                V::peniko::color::palette::css::ORANGE,
+                V::peniko::color::palette::css::PURPLE,
+                6.,
+            ),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Circle::new(K::Point::new(500., 250.), 15.).into(),
+            style: Style::filled(V::peniko::color::palette::css::PURPLE),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Rect::new(50., 200., 180., 280.).into(),
+            style: Style::filled(V::peniko::color::palette::css::YELLOW),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Ellipse::new(K::Point::new(300., 350.), K::Vec2::new(40., 70.), 45.).into(),
+            style: Style::stroked(V::peniko::color::palette::css::CYAN, 3.),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Circle::new(K::Point::new(600., 400.), 50.).into(),
+            style: Style::filled(V::peniko::color::palette::css::MAGENTA),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Rect::new(100., 500., 250., 550.).into(),
+            style: Style::stroked(V::peniko::color::palette::css::LIME, 4.),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Ellipse::new(K::Point::new(450., 550.), K::Vec2::new(35., 50.), 0.).into(),
+            style: Style::filled(V::peniko::color::palette::css::NAVY),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Circle::new(K::Point::new(200., 650.), 25.).into(),
+            style: Style::filled_and_stroked(
+                V::peniko::color::palette::css::GOLD,
+                V::peniko::color::palette::css::SILVER,
+                2.,
+            ),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Rect::new(700., 100., 800., 200.).into(),
+            style: Style::filled(V::peniko::color::palette::css::TEAL),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Ellipse::new(K::Point::new(750., 350.), K::Vec2::new(55., 25.), 30.).into(),
+            style: Style::stroked(V::peniko::color::palette::css::MAROON, 5.),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Circle::new(K::Point::new(650., 500.), 45.).into(),
+            style: Style::filled(V::peniko::color::palette::css::OLIVE),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Rect::new(300., 700., 500., 800.).into(),
+            style: Style::filled(V::peniko::color::palette::css::CORAL),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Ellipse::new(K::Point::new(100., 800.), K::Vec2::new(30., 45.), 90.).into(),
+            style: Style::stroked(V::peniko::color::palette::css::CRIMSON, 4.),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Circle::new(K::Point::new(800., 700.), 60.).into(),
+            style: Style::filled_and_stroked(
+                V::peniko::color::palette::css::INDIGO,
+                V::peniko::color::palette::css::KHAKI,
+                3.,
+            ),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Rect::new(900., 400., 950., 500.).into(),
+            style: Style::filled(V::peniko::color::palette::css::AQUAMARINE),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Ellipse::new(K::Point::new(950., 200.), K::Vec2::new(25., 40.), 0.).into(),
+            style: Style::stroked(V::peniko::color::palette::css::BROWN, 6.),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Circle::new(K::Point::new(850., 850.), 20.).into(),
+            style: Style::filled(V::peniko::color::palette::css::AZURE),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Rect::new(50., 900., 150., 950.).into(),
+            style: Style::stroked(V::peniko::color::palette::css::BLACK, 2.),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Ellipse::new(K::Point::new(400., 900.), K::Vec2::new(70., 20.), 15.).into(),
+            style: Style::filled(V::peniko::color::palette::css::SALMON),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Circle::new(K::Point::new(700., 900.), 40.).into(),
+            style: Style::filled(V::peniko::color::palette::css::TURQUOISE),
+        }),
+        Element::new(ElementInner::Shape {
+            value: K::Rect::new(950., 700., 1050., 850.).into(),
+            style: Style::filled_and_stroked(
+                V::peniko::color::palette::css::VIOLET,
+                V::peniko::color::palette::css::WHEAT,
+                4.,
+            ),
+        }),
+    ];
 
+    // Позиции и rotation для всех 24 элементов
+    let transforms = [
+        (-80., 33., 0.0),
+        (210., -150., 15.0),
+        (-320., 180., 45.0),
+        (60., 260., -30.0),
+        (-150., -280., 90.0),
+        (150., -100., 60.0),
+        (-200., 50., 120.0),
+        (100., 150., -45.0),
+        (-50., -200., 180.0),
+        (250., 100., 75.0),
+        (-100., 300., -90.0),
+        (50., -350., 30.0),
+        (-250., -150., 135.0),
+        (200., 200., -60.0),
+        (-300., 250., 105.0),
+        (350., -50., -15.0),
+        (-400., 400., 50.0),
+        (300., -250., 165.0),
+        (-150., 450., -75.0),
+        (450., 50., 22.0),
+        (-350., -300., 110.0),
+        (100., 500., -20.0),
+        (400., 350., 85.0),
+        (-200., 600., 155.0),
+    ];
+
+    for (mut element, (x, y, rot)) in elements.into_iter().zip(transforms.iter()) {
+        element.on_state(move |s| {
+            s.position.x = *x;
+            s.position.y = *y;
+            s.rotation = *rot;
+        });
+        app.editor.add_element(element);
+    }
     let _ = event_loop.run_app(&mut app);
 
     Ok(())

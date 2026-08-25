@@ -39,13 +39,9 @@ impl Default for ElementState {
 pub struct Element {
     inner: ElementInner,
     state: ElementState,
-
     local_bbox: Rect,
     world_bbox: Rect,
-
     transform: Affine,
-
-    dirty: bool,
 }
 
 impl Default for Element {
@@ -56,7 +52,6 @@ impl Default for Element {
             local_bbox: Rect::default(),
             world_bbox: Rect::default(),
             transform: Affine::IDENTITY,
-            dirty: true,
         }
     }
 }
@@ -81,7 +76,7 @@ impl Element {
             ElementInner::None => Rect::ZERO,
         };
         self.inner = inner;
-        self.dirty = true;
+        self.recompute();
     }
 
     #[inline(always)]
@@ -89,10 +84,13 @@ impl Element {
         &self.state
     }
 
-    #[inline(always)]
-    pub fn state_mut(&mut self) -> &mut ElementState {
-        self.dirty = true;
-        &mut self.state
+    #[inline]
+    pub fn on_state<F>(&mut self, f: F)
+    where
+        F: FnOnce(&mut ElementState),
+    {
+        f(&mut self.state);
+        self.recompute();
     }
 
     fn recompute(&mut self) {
@@ -124,36 +122,20 @@ impl Element {
             new_center_x + new_half_w,
             new_center_y + new_half_h,
         );
-
-        self.dirty = false;
-    }
-
-    #[inline(always)]
-    fn ensure_updated(&mut self) {
-        if self.dirty {
-            self.recompute();
-        }
     }
 
     #[inline]
-    pub fn transform(&mut self) -> Affine {
-        self.ensure_updated();
+    pub fn transform(&self) -> Affine {
         self.transform
     }
 
     #[inline]
-    pub fn world_bounding_box(&mut self) -> Rect {
-        self.ensure_updated();
+    pub fn world_bounding_box(&self) -> Rect {
         self.world_bbox
     }
 
-    #[inline]
-    pub fn render(&mut self, scene: &mut Scene) {
-        self.render_with_base(scene, Affine::IDENTITY);
-    }
-
-    pub fn render_with_base(&mut self, scene: &mut Scene, base: Affine) {
-        let transform = base * self.transform();
+    pub fn render(&mut self, scene: &mut Scene, base: Affine) {
+        let transform = base * self.transform;
 
         match &self.inner {
             ElementInner::Shape { value, style } => {

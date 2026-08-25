@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{camera::Camera, element::Element};
+use crate::{camera::Camera, element::Element, style::Style};
 use vello as V;
 use vello::kurbo as K;
 use winit::{
@@ -8,9 +8,6 @@ use winit::{
     event as WE, keyboard as WK,
     window::{CursorIcon, Window},
 };
-
-/// Default zoom applied to the initial camera on editor creation.
-const DEFAULT_ZOOM: f64 = 1.9;
 
 #[derive(Debug, Clone, Copy)]
 struct MouseState {
@@ -48,9 +45,12 @@ pub enum Tool {
 pub struct Editor {
     elements: Vec<(ElementId, Element)>,
     selected: Vec<ElementId>,
+    dragging_selection: bool,
     // Placeholder for an in-progress marquee/rectangle selection.
     // Not yet used; will likely become a small struct (start/end points).
-    selection: Option<()>,
+    selection: Option<K::Rect>,   // экранные координаты рамки
+    drag_start: Option<K::Point>, // экранная точка начала drag
+
     hit_element: Option<ElementId>,
 
     id_acc: u64,
@@ -59,14 +59,14 @@ pub struct Editor {
     mouse: MouseState,
     camera: Vec<Camera>,
     camera_idx: usize,
+
+    is_super_pressed: bool,
 }
 
 impl Editor {
     pub fn new() -> Self {
         let mut editor = Self::default();
-        editor
-            .camera
-            .push(Camera::builder().with_zoom(DEFAULT_ZOOM).build());
+        editor.camera.push(Camera::default());
         editor
     }
 
@@ -82,6 +82,9 @@ impl Editor {
             }
             WE::WindowEvent::CursorMoved { position, .. } => {
                 self.mouse_cursor_moved_event(position, window);
+            }
+            WE::WindowEvent::MouseWheel { delta, .. } => {
+                self.mouse_wheel_event(delta, window);
             }
             _ => {}
         }
@@ -105,6 +108,7 @@ impl Editor {
 
     #[inline]
     fn keyboard_input_event(&mut self, event: WE::KeyEvent, window: &mut Arc<Window>) {
+        println!("key: {:?}", event.physical_key);
         match event.physical_key {
             WK::PhysicalKey::Code(key_code) => match key_code {
                 WK::KeyCode::KeyH => {
@@ -112,6 +116,13 @@ impl Editor {
                 }
                 WK::KeyCode::KeyV => {
                     self.change_tool(Tool::Selection, window);
+                }
+                WK::KeyCode::SuperLeft | WK::KeyCode::SuperRight => {
+                    self.is_super_pressed = event.state == WE::ElementState::Pressed;
+                }
+                WK::KeyCode::KeyZ => {
+                    self.current_camera_mut().reset_with_viewport();
+                    window.request_redraw();
                 }
                 _ => {}
             },
@@ -137,10 +148,34 @@ impl Editor {
                     Tool::Selection => {
                         if is_pressed {
                             if let Some(id) = self.hit_element {
-                                self.selected.clear();
-                                self.selected.push(id);
-                                println!("hit: {:?}", id);
+                                if !self.selected.contains(&id) {
+                                    self.selected.clear();
+                                    self.selected.push(id);
+                                }
+                                self.dragging_selection = true;
+                                window.request_redraw();
+                            } else {
+                                self.dragging_selection = false;
+                                self.drag_start = Some(self.mouse.cursor_pos);
+                                self.selection = None;
                             }
+                        } else {
+                            self.dragging_selection = false;
+
+                            if let Some(rect) = self.selection.take() {
+                                let transform = self.current_camera_mut().transform().inverse();
+                                let p0 = transform * K::Point::new(rect.x0, rect.y0);
+                                let p1 = transform * K::Point::new(rect.x1, rect.y1);
+                                let world_rect = K::Rect::from_points(p0, p1);
+
+                                self.selected.clear();
+                                for (id, el) in self.elements.iter_mut() {
+                                    if world_rect.contains(el.world_bounding_box().center()) {
+                                        self.selected.push(*id);
+                                    }
+                                }
+                            }
+                            self.drag_start = None;
                         }
                     }
                     Tool::Hand => {
@@ -179,14 +214,20 @@ impl Editor {
         window: &mut Arc<Window>,
     ) {
         let new_cursor_pos = K::Point::new(position.x, position.y);
-        let cursor_delta = new_cursor_pos - self.mouse.cursor_pos;
+        let prev_cursor_pos = self.mouse.cursor_pos; // save before overwrite
         self.mouse.cursor_pos = new_cursor_pos;
 
-        // Hit test against elements visible in the current viewport.
         let camera = self.current_camera_mut();
-        let transform = camera.transform().inverse();
+        let transform = camera.transform();
+        let transform_inv = transform.inverse();
         let visible = camera.visible_world_rect();
-        let world_cursor_pos = transform * self.mouse.cursor_pos;
+
+        let world_cursor_pos = transform_inv * new_cursor_pos;
+        let prev_world_cursor_pos = transform_inv * prev_cursor_pos;
+        let world_cursor_delta = world_cursor_pos - prev_world_cursor_pos;
+
+        // screen-space delta, still needed for camera panning below
+        let screen_cursor_delta = new_cursor_pos - prev_cursor_pos;
 
         self.hit_element = None;
         for (id, el) in self.elements.iter_mut() {
@@ -195,6 +236,21 @@ impl Editor {
             }
             if el.world_bounding_box().contains(world_cursor_pos) {
                 self.hit_element = Some(*id);
+            }
+        }
+
+        if self.tool == Tool::Selection && self.mouse.pressed[0] {
+            if self.dragging_selection {
+                self.elements
+                    .iter_mut()
+                    .filter(|(id, _)| self.selected.contains(id))
+                    .for_each(|(_, el)| {
+                        el.on_state(|s| s.position = s.position + world_cursor_delta)
+                    });
+                window.request_redraw();
+            } else if let Some(start) = self.drag_start {
+                self.selection = Some(K::Rect::from_points(start, self.mouse.cursor_pos));
+                window.request_redraw();
             }
         }
 
@@ -207,10 +263,55 @@ impl Editor {
         }
 
         // Hand tool + left-button drag, or middle-button drag, pans the camera.
+        // Panning uses screen-space delta because pan_by_screen_delta expects it.
         if (self.tool == Tool::Hand && self.mouse.pressed[0]) || self.mouse.pressed[2] {
-            self.current_camera_mut().pan_by_screen_delta(cursor_delta);
+            self.current_camera_mut()
+                .pan_by_screen_delta(screen_cursor_delta);
             window.request_redraw();
         }
+    }
+
+    fn mouse_wheel_event(&mut self, delta: WE::MouseScrollDelta, window: &mut Arc<Window>) {
+        const LINE_HEIGHT: f64 = 16.0;
+        let (dx, dy) = match delta {
+            WE::MouseScrollDelta::LineDelta(x, y) => {
+                (x as f64 * LINE_HEIGHT, y as f64 * LINE_HEIGHT)
+            }
+            WE::MouseScrollDelta::PixelDelta(p) => (p.x, p.y),
+        };
+
+        if self.is_super_pressed {
+            const ZOOM_SPEED: f64 = 0.01;
+            const MIN_ZOOM_FACTOR: f64 = 0.9;
+            const MAX_ZOOM_FACTOR: f64 = 1.1;
+
+            let factor = (1.0 + dy * ZOOM_SPEED).clamp(MIN_ZOOM_FACTOR, MAX_ZOOM_FACTOR);
+            let screen_poin = self.mouse.cursor_pos;
+            self.current_camera_mut()
+                .zoom_by_at(screen_poin, factor, 1.);
+        } else {
+            let camera_state = self.current_camera_mut().state_mut();
+            camera_state.position.x += dx;
+            camera_state.position.y += dy;
+        }
+
+        window.request_redraw();
+    }
+
+    pub fn selection_bounds(&self) -> Option<K::Rect> {
+        self.selected
+            .iter()
+            .filter_map(|id| self.element_by_id(*id))
+            .map(|el| el.world_bounding_box())
+            .reduce(|acc, bbox| acc.union(bbox))
+    }
+
+    #[inline]
+    fn element_by_id(&self, id: ElementId) -> Option<&Element> {
+        self.elements
+            .iter()
+            .find(|(eid, _)| *eid == id)
+            .map(|(_, el)| el)
     }
 
     #[inline(always)]
@@ -237,7 +338,40 @@ impl Editor {
         for (_, el) in self.elements.iter_mut() {
             let bbox = el.world_bounding_box();
             if visible.overlaps(bbox) {
-                el.render_with_base(scene, camera_transform);
+                el.render(scene, camera_transform);
+            }
+        }
+
+        if !self.selected.is_empty() {
+            let style = Style::filled_and_stroked(
+                V::peniko::color::palette::css::CYAN.with_alpha(0.1),
+                V::peniko::color::palette::css::CYAN.with_alpha(0.9),
+                2.0,
+            );
+            for id in self.selected.iter() {
+                if let Some((_, el)) = self.elements.iter_mut().find(|(v, _)| *v == *id) {
+                    let bbox = el.world_bounding_box();
+                    if let Some((color, fill)) = style.fill {
+                        scene.fill(fill, camera_transform, color, None, &bbox);
+                    }
+                    if let Some((color, stroke)) = &style.stroke {
+                        scene.stroke(stroke, camera_transform, color, None, &bbox);
+                    }
+                }
+            }
+        }
+
+        if let Some(selection) = self.selection.as_ref() {
+            let style = Style::filled_and_stroked(
+                V::peniko::color::palette::css::GRAY.with_alpha(0.1),
+                V::peniko::color::palette::css::GRAY.with_alpha(0.9),
+                2.0,
+            );
+            if let Some((color, fill)) = style.fill {
+                scene.fill(fill, K::Affine::IDENTITY, color, None, selection);
+            }
+            if let Some((color, stroke)) = &style.stroke {
+                scene.stroke(stroke, K::Affine::IDENTITY, color, None, selection);
             }
         }
     }
