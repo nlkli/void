@@ -4,13 +4,13 @@ pub const MIN_ZOOM: f64 = 1e-6;
 pub const MAX_ZOOM: f64 = 1e6;
 
 #[derive(Debug, Clone, Copy)]
-pub struct CameraState {
+pub struct CameraPose {
     pub viewport: Size,
     pub position: Point,
     pub zoom: f64,
 }
 
-impl Default for CameraState {
+impl Default for CameraPose {
     fn default() -> Self {
         Self {
             viewport: Size::ZERO,
@@ -24,8 +24,7 @@ impl Default for CameraState {
 pub struct Camera {
     transform: Affine,
     visible_world_rect: Rect,
-    state: CameraState,
-    dirty: bool,
+    state: CameraPose,
 }
 
 impl Default for Camera {
@@ -33,8 +32,7 @@ impl Default for Camera {
         Self {
             transform: Affine::IDENTITY,
             visible_world_rect: Rect::default(),
-            state: CameraState::default(),
-            dirty: true,
+            state: CameraPose::default(),
         }
     }
 }
@@ -48,83 +46,83 @@ impl Camera {
         CameraBuilder::new()
     }
 
-    #[inline(always)]
-    pub fn state(&self) -> &CameraState {
+    #[inline]
+    pub fn pose(&self) -> &CameraPose {
         &self.state
     }
 
-    #[inline(always)]
-    pub fn state_mut(&mut self) -> &mut CameraState {
-        self.dirty = true;
-        &mut self.state
-    }
-
-    fn recompute(&mut self) {
-        let s = &mut self.state;
-        s.zoom = s.zoom.clamp(MIN_ZOOM, MAX_ZOOM);
-
-        self.transform = Affine::translate((s.viewport * 0.5).to_vec2())
-            * Affine::scale(s.zoom)
-            * Affine::translate(-s.position.to_vec2());
-
-        let hx = s.viewport.width * 0.5 / s.zoom;
-        let hy = s.viewport.height * 0.5 / s.zoom;
-
-        self.visible_world_rect = Rect::new(
-            s.position.x - hx,
-            s.position.y - hy,
-            s.position.x + hx,
-            s.position.y + hy,
-        );
-
-        self.dirty = false;
-    }
-
-    #[inline(always)]
-    fn ensure_updated(&mut self) {
-        if self.dirty {
-            self.recompute();
-        }
+    #[inline]
+    pub fn on_pose<F>(&mut self, f: F)
+    where
+        F: FnOnce(&mut CameraPose),
+    {
+        f(&mut self.state);
+        self.recompute();
     }
 
     #[inline]
-    pub fn transform(&mut self) -> Affine {
-        self.ensure_updated();
+    fn recompute(&mut self) {
+        let state = &mut self.state;
+
+        state.zoom = state.zoom.clamp(MIN_ZOOM, MAX_ZOOM);
+
+        let half_viewport = state.viewport * 0.5;
+        let position = state.position;
+        let zoom = state.zoom;
+
+        self.transform = Affine::translate(half_viewport.to_vec2())
+            * Affine::scale(zoom)
+            * Affine::translate(-position.to_vec2());
+
+        let half_width = half_viewport.width / zoom;
+        let half_height = half_viewport.height / zoom;
+
+        self.visible_world_rect = Rect::new(
+            position.x - half_width,
+            position.y - half_height,
+            position.x + half_width,
+            position.y + half_height,
+        );
+    }
+
+    #[inline]
+    pub fn transform(&self) -> Affine {
         self.transform
     }
 
     #[inline]
-    pub fn visible_world_rect(&mut self) -> Rect {
-        self.ensure_updated();
+    pub fn visible_world_rect(&self) -> Rect {
         self.visible_world_rect
     }
 
+    #[inline]
     pub fn pan_by_screen_delta(&mut self, screen_delta: Vec2) {
-        let s = self.state_mut();
-        s.position -= screen_delta / s.zoom;
+        self.on_pose(|state| {
+            state.position -= screen_delta / state.zoom;
+        });
     }
 
     pub fn zoom_at(&mut self, screen_point: Point, new_zoom: f64, bias: f64) {
-        self.ensure_updated();
-
         let new_zoom = new_zoom.clamp(MIN_ZOOM, MAX_ZOOM);
-        let s = self.state_mut();
-        let full_offset = screen_point.to_vec2() - (s.viewport * 0.5).to_vec2();
-        let offset = full_offset * bias;
-        let world_under_point = s.position + offset / s.zoom;
 
-        s.zoom = new_zoom;
-        s.position = world_under_point - offset / new_zoom;
+        self.on_pose(|state| {
+            let offset = (screen_point.to_vec2() - (state.viewport * 0.5).to_vec2()) * bias;
+            let world_under_point = state.position + offset / state.zoom;
+
+            state.zoom = new_zoom;
+            state.position = world_under_point - offset / new_zoom;
+        });
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn zoom_by_at(&mut self, screen_point: Point, factor: f64, bias: f64) {
         self.zoom_at(screen_point, self.state.zoom * factor, bias);
     }
 
-    #[inline(always)]
     pub fn reset_with_viewport(&mut self) {
         *self = Self::builder().with_viewport(self.state.viewport).build();
+
+        self.recompute();
     }
 }
 
@@ -160,11 +158,6 @@ impl CameraBuilder {
         self.c.state.zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
         self
     }
-
-    // pub fn with_rotation(mut self, rotation: f64) -> Self {
-    //     self.c.state.rotation = rotation;
-    //     self
-    // }
 
     pub fn with_viewport(mut self, viewport: Size) -> Self {
         self.c.state.viewport = viewport;

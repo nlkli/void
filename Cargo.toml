@@ -12,6 +12,9 @@ anyhow = "1"
 notify = "8.1"
 configparser = "3.2"
 
+indexmap = "2"
+rustc-hash = "2"
+
 # ?
 pollster = "0.4"
 # slotmap = "1.1"

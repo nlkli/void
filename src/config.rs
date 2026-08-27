@@ -310,6 +310,12 @@ impl Window {
             if !w.macos_tabbing_identifier.is_empty() {
                 attr = attr.with_tabbing_identifier(&w.macos_tabbing_identifier);
             }
+
+            // let behavior = winit::platform::macos::NSWindowCollectionBehavior::CanJoinAllSpaces
+            //     | winit::platform::macos::NSWindowCollectionBehavior::CanJoinAllApplications
+            //     | winit::platform::macos::NSWindowCollectionBehavior::FullScreenAuxiliary;
+            //
+            // attr = attr.with_collection_behavior(behavior.0);
         }
 
         attr

@@ -20,16 +20,18 @@ impl Style {
             stroke: None,
         }
     }
-    pub fn stroked(color: Color, width: f64) -> Self {
+
+    pub fn stroked(color: Color, stroke: Stroke) -> Self {
         Self {
             fill: None,
-            stroke: Some((color, Stroke::new(width))),
+            stroke: Some((color, stroke)),
         }
     }
-    pub fn filled_and_stroked(fill: Color, stroke: Color, width: f64) -> Self {
+
+    pub fn filled_and_stroked(fill_color: Color, stroke_color: Color, stroke: Stroke) -> Self {
         Self {
-            fill: Some((fill, Fill::NonZero)),
-            stroke: Some((stroke, Stroke::new(width))),
+            fill: Some((fill_color, Fill::NonZero)),
+            stroke: Some((stroke_color, stroke)),
         }
     }
 
@@ -50,5 +52,20 @@ impl Style {
         if let Some((stroke_color, _)) = &mut self.stroke {
             *stroke_color = color;
         }
+    }
+
+    #[inline(always)]
+    pub fn is_filled(&self) -> bool {
+        self.fill.is_some()
+    }
+
+    #[inline(always)]
+    pub fn is_stroked(&self) -> bool {
+        self.stroke.is_some()
+    }
+
+    #[inline(always)]
+    pub fn is_filled_and_stroked(&self) -> bool {
+        self.is_filled() && self.is_stroked()
     }
 }
